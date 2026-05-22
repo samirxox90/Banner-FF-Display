@@ -1,21 +1,12 @@
 import { useState, useMemo, useCallback, useEffect, useTransition, memo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Check,
-  Copy,
-  ExternalLink,
-  ChevronDown,
-  Loader2,
-  AlertCircle,
-  Search,
-  X,
-  Sparkles,
-  ShoppingBag,
-  LayoutGrid,
+  Check, Copy, ExternalLink, ChevronDown, Loader2,
+  AlertCircle, Search, X, Sparkles, ShoppingBag, LayoutGrid,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
-/* ─────────── Regions ─────────── */
+/* ─── Regions ─── */
 const REGIONS = [
   { code: "SG",    name: "Singapore" },
   { code: "BD",    name: "Bangladesh" },
@@ -33,7 +24,7 @@ const REGIONS = [
   { code: "TW",    name: "Taiwan" },
 ];
 
-/* Per-region quick filter chips */
+/* Per-region quick-filter chips */
 const REGION_FILTERS: Record<string, string[]> = {
   SG:    ["Tab", "1400x700"],
   IND:   ["Tab", "1400x700"],
@@ -51,68 +42,149 @@ const REGION_FILTERS: Record<string, string[]> = {
   TH:    ["TabTH", "1400x700"],
 };
 
-/* ─────────── Types ─────────── */
+/* Group priority: EVENTS first = most recent */
+const GROUP_ORDER = [
+  "EVENTS", "LUCKROYALE", "MISSION", "TOPUP",
+  "BOOYAHPASS", "PATCH", "SOCIALS_HTML", "OTHERS",
+];
+
 type Tab = "banners" | "store";
 
-interface BannerItem {
+/* New API shape (groups = URL string arrays) */
+interface ApiResponseNew {
+  success: boolean;
+  server: string;
+  total_assets?: number;
+  groups: Record<string, string[]>;
+}
+
+/* Old API shape (categories = item-object arrays) — kept for fallback */
+interface LegacyItem {
   slno: number;
   filename: string;
   request_name: string;
   url: string;
 }
-
-interface ApiResponse {
+interface ApiResponseOld {
   success: boolean;
   server: string;
   categories: {
-    backgrounds?: { total: number; items: BannerItem[] };
-    booyahpass?:  { total: number; items: BannerItem[] };
-    loading?:     { total: number; items: BannerItem[] };
-    html?:        { total: number; items: BannerItem[] };
-    others?:      { total: number; items: BannerItem[] };
+    backgrounds?: { items: LegacyItem[] };
+    booyahpass?:  { items: LegacyItem[] };
+    loading?:     { items: LegacyItem[] };
+    html?:        { items: LegacyItem[] };
+    others?:      { items: LegacyItem[] };
   };
 }
 
-/* ─────────── URL cleaning ─────────── */
+type ApiResponse = ApiResponseNew | ApiResponseOld;
+
+/* Normalised item used everywhere in the UI */
+interface BannerItem {
+  id: string;
+  request_name: string;
+  url: string;
+  group: string;
+}
+
+/* ─── URL helpers ─── */
 function cleanUrl(raw: string): string {
   if (!raw) return raw;
-
-  // 1. Remove duplicated region path: /common/{1-6 lower}/common/ → /common/
-  //    Handles: /common/in/common/, /common/com/common/, /common/sg/common/ etc.
-  let url = raw.replace(/\/common\/[a-z]{1,6}\/common\//gi, "/common/");
-
-  // 2. Remove leftover short region prefix directly before OB version number
-  //    e.g. /common/inOB53/ or /common/0OB46/ or /common/-OB46/ → /common/OB46/
+  // Strip garbage / non-ASCII that sometimes trails the real URL
+  let url = raw.replace(/[^\x20-\x7E]+.*$/, "").trim();
+  // Remove duplicated region path: /common/{letters}/common/ → /common/
+  url = url.replace(/\/common\/[a-z]{1,6}\/common\//gi, "/common/");
+  // Remove short region prefix directly before OB version: /common/0OB53/ → /common/OB53/
   url = url.replace(/\/common\/[-0-9a-zA-Z]{1,4}(OB\d+)\//gi, "/common/$1/");
-
-  // 3. Strip everything after a valid file extension (garbage bytes)
+  // Trim junk after a known extension
   const extMatch = url.match(
-    /^(https?:\/\/[^\s\x00-\x1F\x7F-\uFFFF]+?\.(jpg|jpeg|png|gif|webp|svg|mp4|mp3|ogg|html|json|ktx|pvr|astc|png))/i
+    /^(https?:\/\/[^\s]+?\.(jpg|jpeg|png|gif|webp|svg|mp4|mp3|ogg|html|json|ktx))/i
   );
-  if (extMatch) return extMatch[1];
-
-  // 4. Fallback: strip non-ASCII chars from the end
-  const cleaned = url.replace(/[^\x20-\x7E]+.*$/, "").trim();
-  return cleaned || raw;
+  return extMatch ? extMatch[1] : url;
 }
 
-/* ─────────── Junk URL filter ─────────── */
-const JUNK_PATTERN =
-  /discord\.gg|facebook\.com|youtube\.com|youtu\.be|whatsapp\.com|linktr\.ee|ffredirect|t\.me\/|instagram\.com|twitter\.com|tiktok\.com|docs\.google\.com|ff\.redirect|ff\.article\.en|ff\.garena\.com|esports\.freefire|PreviewBG|167\.png/i;
-
-function isJunk(item: BannerItem): boolean {
-  return JUNK_PATTERN.test(item.url) || JUNK_PATTERN.test(item.request_name);
+function nameFromUrl(rawUrl: string): string {
+  const url = cleanUrl(rawUrl);
+  // Grab last path segment
+  const seg = url.split("/").pop() ?? url;
+  // Strip known extension
+  let name = seg.replace(/\.(jpg|jpeg|png|gif|webp|svg|mp4|mp3|ogg|html|json|ktx)$/i, "");
+  // Strip trailing language/region suffixes like _IND_en, _en, _hi, -en
+  name = name.replace(/[_-](IND|SG|BD|CIS|EU|NA|PK|ID|TH|ME|BR|LATAM|VN|TW)[_-]?(en|hi|ar|th|vn|es|pt|zh|ru|id|tr)?$/i, "");
+  name = name.replace(/[_-](en|hi|ar|th|vn|es|pt|zh|ru|id|tr)$/i, "");
+  return name || seg;
 }
 
-/* ─────────── API fetch ─────────── */
+/* ─── Junk filter ─── */
+const JUNK_RE = /discord\.gg|facebook\.com|youtube\.com|youtu\.be|whatsapp\.com|linktr\.ee|ffredirect|t\.me\/|instagram\.com|twitter\.com|tiktok\.com|docs\.google\.com|ff\.redirect|ff\.article\.en|ff\.garena\.com|esports\.freefire|PreviewBG|167\.png/i;
+
+function isJunkUrl(url: string): boolean {
+  return JUNK_RE.test(url);
+}
+
+/* ─── Normalise API response → BannerItem[] ─── */
+function normaliseItems(data: ApiResponse): BannerItem[] {
+  const items: BannerItem[] = [];
+
+  /* New shape: groups with URL arrays */
+  if ("groups" in data && data.groups) {
+    const groups = data.groups as Record<string, string[]>;
+    const processed = new Set<string>();
+
+    for (const groupKey of [...GROUP_ORDER, ...Object.keys(groups)]) {
+      if (processed.has(groupKey)) continue;
+      processed.add(groupKey);
+      const urls: string[] = groups[groupKey] ?? [];
+      urls.forEach((rawUrl, i) => {
+        const url = cleanUrl(rawUrl);
+        if (!url || isJunkUrl(url)) return;
+        items.push({
+          id:           `${groupKey}-${i}-${url.slice(-20)}`,
+          request_name: nameFromUrl(rawUrl),
+          url,
+          group:        groupKey,
+        });
+      });
+    }
+    return items;
+  }
+
+  /* Legacy shape: categories with item objects */
+  if ("categories" in data && data.categories) {
+    const cats = (data as ApiResponseOld).categories;
+    const legacy = [
+      ...(cats.loading?.items     ?? []),
+      ...(cats.backgrounds?.items ?? []),
+      ...(cats.booyahpass?.items  ?? []),
+      ...(cats.html?.items        ?? []),
+      ...(cats.others?.items      ?? []),
+    ].sort((a, b) => b.slno - a.slno);
+
+    legacy.forEach((item) => {
+      const url = cleanUrl(item.url);
+      if (!url || isJunkUrl(url)) return;
+      items.push({
+        id:           `legacy-${item.slno}-${item.request_name}`,
+        request_name: item.request_name,
+        url,
+        group:        "LEGACY",
+      });
+    });
+    return items;
+  }
+
+  return items;
+}
+
+/* ─── Fetch ─── */
 function fetchBanners(region: string): Promise<ApiResponse> {
   return fetch(`/api/banners?server=${region}`).then((r) => {
-    if (!r.ok) throw new Error("Failed to fetch banners");
+    if (!r.ok) throw new Error("fetch failed");
     return r.json();
   });
 }
 
-/* ─────────── Logo ─────────── */
+/* ─── Logo ─── */
 function FFLogo() {
   return (
     <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -131,50 +203,34 @@ function FFLogo() {
   );
 }
 
-/* ─────────── Banner Card (memoised) ─────────── */
+/* ─── Banner Card (memoised) ─── */
 const BannerCard = memo(function BannerCard({ item }: { item: BannerItem }) {
   const { toast } = useToast();
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied]   = useState(false);
   const [imgError, setImgError] = useState(false);
-  const url = useMemo(() => cleanUrl(item.url), [item.url]);
 
-  const handleCopy = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      navigator.clipboard.writeText(url).then(() => {
-        setCopied(true);
-        toast({ description: "URL copied!" });
-        setTimeout(() => setCopied(false), 2000);
-      });
-    },
-    [url, toast]
-  );
+  const handleCopy = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(item.url).then(() => {
+      setCopied(true);
+      toast({ description: "URL copied!" });
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }, [item.url, toast]);
 
-  const handleOpen = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      window.open(url, "_blank", "noopener,noreferrer");
-    },
-    [url]
-  );
+  const handleOpen = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    window.open(item.url, "_blank", "noopener,noreferrer");
+  }, [item.url]);
 
-  const isImage =
-    !url.endsWith(".html") &&
-    !url.endsWith(".mp4") &&
-    !url.endsWith(".mp3") &&
-    !url.endsWith(".ogg") &&
-    !url.endsWith(".ktx") &&
-    !url.endsWith(".pvr") &&
-    !url.endsWith(".astc") &&
-    !url.endsWith(".json");
+  const isImage = !/\.(html|mp4|mp3|ogg|ktx|pvr|astc|json)$/i.test(item.url);
 
   return (
     <div className="overflow-hidden rounded-xl border border-white/5 bg-white/[0.04] transition-colors duration-150 hover:border-orange-500/25 hover:bg-white/[0.06]">
-      {/* Image / fallback */}
       {isImage && !imgError ? (
         <div className="relative w-full aspect-[21/9] bg-black/40 overflow-hidden">
           <img
-            src={url}
+            src={item.url}
             alt={item.request_name}
             className="w-full h-full object-cover"
             onError={() => setImgError(true)}
@@ -182,11 +238,9 @@ const BannerCard = memo(function BannerCard({ item }: { item: BannerItem }) {
             decoding="async"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent pointer-events-none" />
-          <button
-            onClick={handleOpen}
+          <button onClick={handleOpen}
             className="absolute top-2 right-2 w-8 h-8 rounded-lg bg-black/55 hover:bg-orange-500 backdrop-blur-sm flex items-center justify-center transition-colors border border-white/10"
-            title="Open"
-          >
+            title="Open">
             <ExternalLink size={13} className="text-white" />
           </button>
         </div>
@@ -195,31 +249,26 @@ const BannerCard = memo(function BannerCard({ item }: { item: BannerItem }) {
           <div className="text-center text-white/20 px-4 select-none">
             <ExternalLink size={22} className="mx-auto mb-1.5 opacity-40" />
             <p className="text-xs break-all line-clamp-2 leading-relaxed opacity-70">
-              {url.replace(/^https?:\/\//, "")}
+              {item.url.replace(/^https?:\/\//, "")}
             </p>
           </div>
-          <button
-            onClick={handleOpen}
-            className="absolute top-2 right-2 w-8 h-8 rounded-lg bg-black/50 hover:bg-orange-500 flex items-center justify-center transition-colors border border-white/10"
-          >
+          <button onClick={handleOpen}
+            className="absolute top-2 right-2 w-8 h-8 rounded-lg bg-black/50 hover:bg-orange-500 flex items-center justify-center transition-colors border border-white/10">
             <ExternalLink size={13} className="text-white" />
           </button>
         </div>
       )}
 
-      {/* Footer */}
       <div className="px-3.5 py-2.5 flex items-center justify-between gap-3">
         <p className="text-sm font-medium text-white/75 truncate" title={item.request_name}>
           {item.request_name}
         </p>
-        <button
-          onClick={handleCopy}
+        <button onClick={handleCopy}
           className={`flex-shrink-0 flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg font-medium transition-colors ${
             copied
               ? "bg-green-500/15 text-green-400 border border-green-500/25"
               : "bg-white/5 hover:bg-orange-500 text-white/45 hover:text-white border border-white/8 hover:border-orange-500"
-          }`}
-        >
+          }`}>
           {copied ? <><Check size={11} />Copied</> : <><Copy size={11} />Copy URL</>}
         </button>
       </div>
@@ -227,259 +276,27 @@ const BannerCard = memo(function BannerCard({ item }: { item: BannerItem }) {
   );
 });
 
-/* ─────────── Debounce hook ─────────── */
-function useDebounce<T>(value: T, delay: number): T {
-  const [debounced, setDebounced] = useState(value);
+/* ─── Debounce hook ─── */
+function useDebounce<T>(value: T, ms: number): T {
+  const [d, setD] = useState(value);
   useEffect(() => {
-    const t = setTimeout(() => setDebounced(value), delay);
+    const t = setTimeout(() => setD(value), ms);
     return () => clearTimeout(t);
-  }, [value, delay]);
-  return debounced;
+  }, [value, ms]);
+  return d;
 }
 
-/* ─────────── Main Page ─────────── */
-export default function BannersPage() {
-  const [region, setRegion]         = useState("IND");
-  const [activeTab, setActiveTab]   = useState<Tab>("banners");
-  const [regionOpen, setRegionOpen] = useState(false);
-  const [searchRaw, setSearchRaw]   = useState("");
-  const [activeFilter, setActiveFilter] = useState<string | null>(null);
-  const [, startTransition]         = useTransition();
-
-  const search = useDebounce(searchRaw, 250);
-
-  const selectedRegion = REGIONS.find((r) => r.code === region) ?? REGIONS[0];
-  const quickFilters   = REGION_FILTERS[region] ?? [];
-
-  /* Reset filter when region changes */
-  useEffect(() => {
-    setActiveFilter(null);
-    setSearchRaw("");
-  }, [region]);
-
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ["banners", region],
-    queryFn:  () => fetchBanners(region),
-    staleTime: 5 * 60 * 1000,
-  });
-
-  /* All items: merge categories, filter junk, sort recent-first (high slno first) */
-  const allItems = useMemo((): BannerItem[] => {
-    if (!data?.categories) return [];
-    const { backgrounds, booyahpass, loading, html, others } = data.categories;
-    return [
-      ...(loading?.items    ?? []),
-      ...(backgrounds?.items ?? []),
-      ...(booyahpass?.items  ?? []),
-      ...(html?.items        ?? []),
-      ...(others?.items      ?? []),
-    ]
-      .filter((item) => !isJunk(item))
-      .sort((a, b) => b.slno - a.slno);
-  }, [data]);
-
-  /* Apply text search + active quick-filter chip */
-  const filteredItems = useMemo(() => {
-    let items = allItems;
-
-    if (activeFilter) {
-      const af = activeFilter.toLowerCase();
-      items = items.filter(
-        (i) =>
-          i.request_name.toLowerCase().includes(af) ||
-          cleanUrl(i.url).toLowerCase().includes(af)
-      );
-    }
-
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      items = items.filter(
-        (i) =>
-          i.request_name.toLowerCase().includes(q) ||
-          cleanUrl(i.url).toLowerCase().includes(q)
-      );
-    }
-
-    return items;
-  }, [allItems, search, activeFilter]);
-
-  const handleSearchChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    startTransition(() => setSearchRaw(e.target.value));
-  }, []);
-
-  const handleClearSearch = useCallback(() => {
-    startTransition(() => setSearchRaw(""));
-  }, []);
-
-  const handleFilterChip = useCallback((chip: string) => {
-    startTransition(() => {
-      setActiveFilter((prev) => (prev === chip ? null : chip));
-      setSearchRaw("");
-    });
-  }, []);
-
-  /* ── Render ── */
+/* ─── Status helper ─── */
+function StatusView({ icon, text }: { icon: React.ReactNode; text: string }) {
   return (
-    <div className="min-h-screen bg-[#0d0f14] text-white">
-      <div className="max-w-2xl mx-auto px-4 pb-16">
-
-        {/* ── Sticky header ── */}
-        <header className="sticky top-0 z-20 bg-[#0d0f14] pt-4 pb-2">
-
-          {/* Logo row */}
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2.5">
-              <FFLogo />
-              <div>
-                <h1 className="text-base font-bold text-white leading-none tracking-wide">FF Login Banners</h1>
-                <p className="text-[10px] text-orange-500/70 font-medium tracking-widest uppercase mt-0.5">Free Fire Asset Viewer</p>
-              </div>
-            </div>
-
-            {/* Region selector */}
-            <div className="relative">
-              <button
-                onClick={() => setRegionOpen((p) => !p)}
-                className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium bg-white/5 hover:bg-white/8 text-white/70 hover:text-white border border-white/8 hover:border-orange-500/40 transition-colors"
-              >
-                <span className="text-xs font-mono text-orange-400 font-bold">{selectedRegion.code}</span>
-                <span className="text-white/30">|</span>
-                <span className="text-xs">{selectedRegion.name}</span>
-                <ChevronDown size={12} className={`text-white/35 transition-transform ${regionOpen ? "rotate-180" : ""}`} />
-              </button>
-
-              {regionOpen && (
-                <div className="absolute top-full mt-2 right-0 w-52 bg-[#161920] border border-white/8 rounded-xl shadow-2xl z-30 overflow-hidden">
-                  <div className="py-1.5 max-h-72 overflow-y-auto">
-                    {REGIONS.map((r) => (
-                      <button
-                        key={r.code}
-                        onClick={() => { setRegion(r.code); setRegionOpen(false); }}
-                        className={`w-full flex items-center justify-between px-3.5 py-2 text-sm transition-colors ${
-                          r.code === region
-                            ? "bg-orange-500/15 text-orange-400 font-semibold"
-                            : "text-white/55 hover:bg-white/5 hover:text-white"
-                        }`}
-                      >
-                        <span>{r.name}</span>
-                        <span className={`text-xs font-mono ${r.code === region ? "text-orange-400" : "text-white/25"}`}>{r.code}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Tab buttons */}
-          <div className="flex gap-2 mb-3">
-            {(["banners", "store"] as Tab[]).map((t) => (
-              <button
-                key={t}
-                onClick={() => setActiveTab(t)}
-                className={`flex items-center gap-1.5 px-5 py-2 rounded-xl text-sm font-semibold capitalize transition-colors ${
-                  activeTab === t
-                    ? "bg-orange-500 text-white"
-                    : "bg-white/5 text-white/45 hover:bg-white/8 hover:text-white border border-white/6"
-                }`}
-              >
-                {t === "banners" ? <LayoutGrid size={13} /> : <ShoppingBag size={13} />}
-                {t.charAt(0).toUpperCase() + t.slice(1)}
-              </button>
-            ))}
-          </div>
-
-          {/* Search + quick filters — only on banners tab */}
-          {activeTab === "banners" && (
-            <>
-              {/* Search input */}
-              <div className="relative mb-2">
-                <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/25 pointer-events-none" />
-                <input
-                  type="text"
-                  value={searchRaw}
-                  onChange={handleSearchChange}
-                  placeholder="Search banners…"
-                  className="w-full bg-white/[0.05] border border-white/8 focus:border-orange-500/50 rounded-xl pl-8.5 pr-8 py-2.5 text-sm text-white placeholder:text-white/25 outline-none transition-colors"
-                />
-                {searchRaw && (
-                  <button
-                    onClick={handleClearSearch}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60 transition-colors p-0.5"
-                  >
-                    <X size={13} />
-                  </button>
-                )}
-              </div>
-
-              {/* Quick filter chips */}
-              {quickFilters.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mb-1">
-                  {quickFilters.map((chip) => (
-                    <button
-                      key={chip}
-                      onClick={() => handleFilterChip(chip)}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors border ${
-                        activeFilter === chip
-                          ? "bg-orange-500 text-white border-orange-500"
-                          : "bg-white/5 text-white/45 border-white/8 hover:bg-white/10 hover:text-white/80"
-                      }`}
-                    >
-                      {chip}
-                    </button>
-                  ))}
-                  {activeFilter && (
-                    <button
-                      onClick={() => setActiveFilter(null)}
-                      className="px-2 py-1 rounded-lg text-xs text-white/30 hover:text-white/60 transition-colors flex items-center gap-1"
-                    >
-                      <X size={10} /> Clear
-                    </button>
-                  )}
-                </div>
-              )}
-            </>
-          )}
-
-          <div className="mt-2 h-px bg-gradient-to-r from-orange-500/20 via-white/5 to-transparent" />
-        </header>
-
-        {/* Overlay to close region dropdown */}
-        {regionOpen && (
-          <div className="fixed inset-0 z-10" onClick={() => setRegionOpen(false)} />
-        )}
-
-        {/* ── Content ── */}
-        <main className="mt-4">
-          {activeTab === "store" ? (
-            <StoreComing />
-          ) : isLoading ? (
-            <StatusView icon={<Loader2 size={28} className="text-orange-500 animate-spin" />}
-                        text={`Loading banners for ${selectedRegion.name}…`} />
-          ) : isError ? (
-            <StatusView icon={<AlertCircle size={28} className="text-red-500/60" />}
-                        text="Failed to load banners. Try a different region." />
-          ) : filteredItems.length === 0 ? (
-            <StatusView icon={<Search size={26} className="text-white/20" />}
-                        text={activeFilter || search ? `No results for "${activeFilter ?? search}"` : "No banners available for this region."} />
-          ) : (
-            <div className="space-y-3">
-              <p className="text-xs text-white/20 font-medium">
-                {filteredItems.length} banner{filteredItems.length !== 1 ? "s" : ""}
-                {(activeFilter || search) ? ` — "${activeFilter ?? search}"` : ""}
-              </p>
-              {filteredItems.map((item, idx) => (
-                <BannerCard key={`${region}-${idx}-${item.slno}-${item.request_name.slice(0, 12)}`} item={item} />
-              ))}
-            </div>
-          )}
-        </main>
-      </div>
+    <div className="flex flex-col items-center justify-center py-24 gap-3">
+      {icon}
+      <p className="text-white/25 text-sm text-center max-w-xs">{text}</p>
     </div>
   );
 }
 
-/* ─────────── Sub-components ─────────── */
+/* ─── Store Coming Soon ─── */
 function StoreComing() {
   return (
     <div className="flex flex-col items-center justify-center py-28 gap-5">
@@ -507,11 +324,204 @@ function StoreComing() {
   );
 }
 
-function StatusView({ icon, text }: { icon: React.ReactNode; text: string }) {
+/* ─── Main Page ─── */
+export default function BannersPage() {
+  const [region, setRegion]             = useState("IND");
+  const [activeTab, setActiveTab]       = useState<Tab>("banners");
+  const [regionOpen, setRegionOpen]     = useState(false);
+  const [searchRaw, setSearchRaw]       = useState("");
+  const [activeFilter, setActiveFilter] = useState<string | null>(null);
+  const [, startTransition]             = useTransition();
+
+  const search = useDebounce(searchRaw, 250);
+  const selectedRegion = REGIONS.find((r) => r.code === region) ?? REGIONS[0];
+  const quickFilters   = REGION_FILTERS[region] ?? [];
+
+  useEffect(() => { setActiveFilter(null); setSearchRaw(""); }, [region]);
+
+  const { data, isLoading, isError } = useQuery({
+    queryKey:  ["banners-v2", region],
+    queryFn:   () => fetchBanners(region),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const allItems = useMemo((): BannerItem[] => {
+    if (!data) return [];
+    return normaliseItems(data);
+  }, [data]);
+
+  const filteredItems = useMemo(() => {
+    let items = allItems;
+    if (activeFilter) {
+      const af = activeFilter.toLowerCase();
+      items = items.filter(
+        (i) => i.request_name.toLowerCase().includes(af) || i.url.toLowerCase().includes(af)
+      );
+    }
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      items = items.filter(
+        (i) => i.request_name.toLowerCase().includes(q) || i.url.toLowerCase().includes(q)
+      );
+    }
+    return items;
+  }, [allItems, search, activeFilter]);
+
+  const handleSearchChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    startTransition(() => setSearchRaw(e.target.value));
+  }, []);
+  const handleClearSearch  = useCallback(() => startTransition(() => setSearchRaw("")), []);
+  const handleFilterChip   = useCallback((chip: string) => {
+    startTransition(() => {
+      setActiveFilter((p) => (p === chip ? null : chip));
+      setSearchRaw("");
+    });
+  }, []);
+
   return (
-    <div className="flex flex-col items-center justify-center py-24 gap-3">
-      {icon}
-      <p className="text-white/25 text-sm text-center max-w-xs">{text}</p>
+    <div className="min-h-screen bg-[#0d0f14] text-white">
+      <div className="max-w-2xl mx-auto px-4 pb-16">
+
+        {/* ── Sticky header ── */}
+        <header className="sticky top-0 z-20 bg-[#0d0f14] pt-4 pb-2">
+
+          {/* Logo + region */}
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2.5">
+              <FFLogo />
+              <div>
+                <h1 className="text-base font-bold text-white leading-none tracking-wide">FF Login Banners</h1>
+                <p className="text-[10px] text-orange-500/70 font-medium tracking-widest uppercase mt-0.5">Free Fire Asset Viewer</p>
+              </div>
+            </div>
+
+            {/* Region dropdown */}
+            <div className="relative">
+              <button
+                onClick={() => setRegionOpen((p) => !p)}
+                className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium bg-white/5 hover:bg-white/8 text-white/70 hover:text-white border border-white/8 hover:border-orange-500/40 transition-colors">
+                <span className="text-xs font-mono text-orange-400 font-bold">{selectedRegion.code}</span>
+                <span className="text-white/30">|</span>
+                <span className="text-xs">{selectedRegion.name}</span>
+                <ChevronDown size={12} className={`text-white/35 transition-transform ${regionOpen ? "rotate-180" : ""}`} />
+              </button>
+              {regionOpen && (
+                <div className="absolute top-full mt-2 right-0 w-52 bg-[#161920] border border-white/8 rounded-xl shadow-2xl z-30 overflow-hidden">
+                  <div className="py-1.5 max-h-72 overflow-y-auto">
+                    {REGIONS.map((r) => (
+                      <button key={r.code}
+                        onClick={() => { setRegion(r.code); setRegionOpen(false); }}
+                        className={`w-full flex items-center justify-between px-3.5 py-2 text-sm transition-colors ${
+                          r.code === region
+                            ? "bg-orange-500/15 text-orange-400 font-semibold"
+                            : "text-white/55 hover:bg-white/5 hover:text-white"
+                        }`}>
+                        <span>{r.name}</span>
+                        <span className={`text-xs font-mono ${r.code === region ? "text-orange-400" : "text-white/25"}`}>{r.code}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Tabs */}
+          <div className="flex gap-2 mb-3">
+            {(["banners", "store"] as Tab[]).map((t) => (
+              <button key={t} onClick={() => setActiveTab(t)}
+                className={`flex items-center gap-1.5 px-5 py-2 rounded-xl text-sm font-semibold capitalize transition-colors ${
+                  activeTab === t
+                    ? "bg-orange-500 text-white"
+                    : "bg-white/5 text-white/45 hover:bg-white/8 hover:text-white border border-white/6"
+                }`}>
+                {t === "banners" ? <LayoutGrid size={13} /> : <ShoppingBag size={13} />}
+                {t.charAt(0).toUpperCase() + t.slice(1)}
+              </button>
+            ))}
+          </div>
+
+          {/* Search + filter chips */}
+          {activeTab === "banners" && (
+            <>
+              <div className="relative mb-2">
+                <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/25 pointer-events-none" />
+                <input
+                  type="text"
+                  value={searchRaw}
+                  onChange={handleSearchChange}
+                  placeholder="Search banners…"
+                  className="w-full bg-white/[0.05] border border-white/8 focus:border-orange-500/50 rounded-xl pl-8 pr-8 py-2.5 text-sm text-white placeholder:text-white/25 outline-none transition-colors"
+                />
+                {searchRaw && (
+                  <button onClick={handleClearSearch}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60 transition-colors p-0.5">
+                    <X size={13} />
+                  </button>
+                )}
+              </div>
+
+              {quickFilters.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mb-1">
+                  {quickFilters.map((chip) => (
+                    <button key={chip} onClick={() => handleFilterChip(chip)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors border ${
+                        activeFilter === chip
+                          ? "bg-orange-500 text-white border-orange-500"
+                          : "bg-white/5 text-white/45 border-white/8 hover:bg-white/10 hover:text-white/80"
+                      }`}>
+                      {chip}
+                    </button>
+                  ))}
+                  {activeFilter && (
+                    <button onClick={() => setActiveFilter(null)}
+                      className="px-2 py-1 rounded-lg text-xs text-white/30 hover:text-white/60 transition-colors flex items-center gap-1">
+                      <X size={10} /> Clear
+                    </button>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+
+          <div className="mt-2 h-px bg-gradient-to-r from-orange-500/20 via-white/5 to-transparent" />
+        </header>
+
+        {regionOpen && (
+          <div className="fixed inset-0 z-10" onClick={() => setRegionOpen(false)} />
+        )}
+
+        {/* ── Content ── */}
+        <main className="mt-4">
+          {activeTab === "store" ? (
+            <StoreComing />
+          ) : isLoading ? (
+            <StatusView
+              icon={<Loader2 size={28} className="text-orange-500 animate-spin" />}
+              text={`Loading banners for ${selectedRegion.name}…`} />
+          ) : isError ? (
+            <StatusView
+              icon={<AlertCircle size={28} className="text-red-500/60" />}
+              text="Failed to load banners. Try a different region." />
+          ) : filteredItems.length === 0 ? (
+            <StatusView
+              icon={<Search size={26} className="text-white/20" />}
+              text={activeFilter || search
+                ? `No results for "${activeFilter ?? search}"`
+                : "No banners found for this region."} />
+          ) : (
+            <div className="space-y-3">
+              <p className="text-xs text-white/20 font-medium">
+                {filteredItems.length} banner{filteredItems.length !== 1 ? "s" : ""}
+                {(activeFilter || search) ? ` — "${activeFilter ?? search}"` : ""}
+              </p>
+              {filteredItems.map((item) => (
+                <BannerCard key={item.id} item={item} />
+              ))}
+            </div>
+          )}
+        </main>
+      </div>
     </div>
   );
 }
