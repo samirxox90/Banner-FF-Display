@@ -55,12 +55,22 @@ interface ApiResponse {
 
 function cleanUrl(raw: string): string {
   if (!raw) return raw;
-  // Extract clean URL up to and including the file extension
-  const extMatch = raw.match(/^(https?:\/\/[\w\-._~:/?#[\]@!$&'()*+,;=%.]+?\.(jpg|jpeg|png|gif|webp|svg|mp4|mp3|ogg|html|json))/i);
+  // Fix duplicated region prefix: /common/{2-4 lowercase letters}/common/ → /common/
+  // e.g. /common/com/common/ or /common/in/common/ or /common/sg/common/
+  let url = raw.replace(/\/common\/[a-z]{1,4}\/common\//gi, "/common/");
+  // Strip non-ASCII / garbage bytes that appear after the file extension
+  const extMatch = url.match(/^(https?:\/\/[^\s\x00-\x1F\x7F-\uFFFF]+?\.(jpg|jpeg|png|gif|webp|svg|mp4|mp3|ogg|html|json|ktx|pvr|astc))/i);
   if (extMatch) return extMatch[1];
-  // Fallback: strip non-ASCII and control chars from the end
-  const cleaned = raw.replace(/[^\x20-\x7E]+.*$/, "").trim();
+  // Fallback: strip non-ASCII chars from the end
+  const cleaned = url.replace(/[^\x20-\x7E]+.*$/, "").trim();
   return cleaned || raw;
+}
+
+const SOCIAL_PATTERN = /discord\.gg|facebook\.com|youtube\.com|youtu\.be|whatsapp\.com|linktr\.ee|ffredirect|t\.me\/|instagram\.com|twitter\.com|tiktok\.com/i;
+
+function isSocialOrJunk(item: BannerItem): boolean {
+  const url = item.url.toLowerCase();
+  return SOCIAL_PATTERN.test(url);
 }
 
 function fetchBanners(region: string): Promise<ApiResponse> {
@@ -152,7 +162,7 @@ function BannerCard({ item }: { item: BannerItem }) {
           <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
           <button
             onClick={handleOpen}
-            className="absolute top-2.5 right-2.5 w-8 h-8 rounded-lg bg-black/60 hover:bg-orange-500 backdrop-blur-sm flex items-center justify-center transition-all duration-150 opacity-0 group-hover:opacity-100 border border-white/10"
+            className="absolute top-2.5 right-2.5 w-8 h-8 rounded-lg bg-black/60 hover:bg-orange-500 backdrop-blur-sm flex items-center justify-center transition-all duration-150 border border-white/10"
             title="Open in new tab"
           >
             <ExternalLink size={13} className="text-white" />
@@ -223,8 +233,10 @@ export default function BannersPage() {
       ...(cats.html?.items ?? []),
       ...(cats.others?.items ?? []),
     ];
-    // Sort by slno descending so most recently added show first
-    return [...combined].sort((a, b) => b.slno - a.slno);
+    // Remove social/redirect/junk links then sort by slno descending (most recent first)
+    return combined
+      .filter((item) => !isSocialOrJunk(item))
+      .sort((a, b) => b.slno - a.slno);
   }, [data]);
 
   const filteredItems = useMemo(() => {
