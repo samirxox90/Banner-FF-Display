@@ -389,9 +389,9 @@ export default function BannersPage() {
   }, [allItems, search, activeFilter]);
 
   const handleSearchChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    startTransition(() => setSearchRaw(e.target.value));
+    setSearchRaw(e.target.value);
   }, []);
-  const handleClearSearch = useCallback(() => startTransition(() => setSearchRaw("")), []);
+  const handleClearSearch = useCallback(() => setSearchRaw(""), []);
   const handleFilterChip  = useCallback((chip: string) => {
     startTransition(() => {
       setActiveFilter((p) => (p === chip ? null : chip));

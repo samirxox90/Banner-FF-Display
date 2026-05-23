@@ -9,7 +9,7 @@ router.get("/banners", async (req, res) => {
     return;
   }
 
-  const allowed = ["SG","BD","IND","CIS","EU","NA","PK","ID","TH","ME","BR","LATAM","VN","TW"];
+  const allowed = ["SG","BD","IND","CIS","EU","NA","PK","ID","TH","MEA","BR","LATAM","VN","TW"];
   if (!allowed.includes(region.toUpperCase())) {
     res.status(400).json({ error: "Invalid region" });
     return;
