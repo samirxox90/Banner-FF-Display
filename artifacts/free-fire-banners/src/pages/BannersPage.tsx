@@ -203,6 +203,42 @@ function FFLogo() {
   );
 }
 
+/* ─── Group badge colours ─── */
+const GROUP_STYLES: Record<string, { bg: string; text: string; dot: string }> = {
+  EVENTS:      { bg: "bg-orange-500/15",  text: "text-orange-400",   dot: "bg-orange-400" },
+  LUCKROYALE:  { bg: "bg-yellow-500/15",  text: "text-yellow-400",   dot: "bg-yellow-400" },
+  BOOYAHPASS:  { bg: "bg-purple-500/15",  text: "text-purple-400",   dot: "bg-purple-400" },
+  TOPUP:       { bg: "bg-green-500/15",   text: "text-green-400",    dot: "bg-green-400"  },
+  PATCH:       { bg: "bg-blue-500/15",    text: "text-blue-400",     dot: "bg-blue-400"   },
+  MISSION:     { bg: "bg-cyan-500/15",    text: "text-cyan-400",     dot: "bg-cyan-400"   },
+  SOCIALS_HTML:{ bg: "bg-pink-500/15",    text: "text-pink-400",     dot: "bg-pink-400"   },
+  OTHERS:      { bg: "bg-white/8",        text: "text-white/40",     dot: "bg-white/30"   },
+  LEGACY:      { bg: "bg-white/8",        text: "text-white/40",     dot: "bg-white/30"   },
+};
+
+const GROUP_LABEL: Record<string, string> = {
+  EVENTS:       "Events",
+  LUCKROYALE:   "Lucky Royale",
+  BOOYAHPASS:   "Booyah Pass",
+  TOPUP:        "Top-Up",
+  PATCH:        "Patch Notes",
+  MISSION:      "Mission",
+  SOCIALS_HTML: "Socials / HTML",
+  OTHERS:       "Others",
+  LEGACY:       "Legacy",
+};
+
+function GroupBadge({ group }: { group: string }) {
+  const style = GROUP_STYLES[group] ?? GROUP_STYLES.OTHERS;
+  const label = GROUP_LABEL[group] ?? group;
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wide border border-white/5 ${style.bg} ${style.text}`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${style.dot}`} />
+      {label}
+    </span>
+  );
+}
+
 /* ─── Banner Card (memoised) ─── */
 const BannerCard = memo(function BannerCard({ item }: { item: BannerItem }) {
   const { toast } = useToast();
@@ -238,6 +274,10 @@ const BannerCard = memo(function BannerCard({ item }: { item: BannerItem }) {
             decoding="async"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent pointer-events-none" />
+          {/* Group badge — overlaid bottom-left on image */}
+          <div className="absolute bottom-2 left-2 pointer-events-none">
+            <GroupBadge group={item.group} />
+          </div>
           <button onClick={handleOpen}
             className="absolute top-2 right-2 w-8 h-8 rounded-lg bg-black/55 hover:bg-orange-500 backdrop-blur-sm flex items-center justify-center transition-colors border border-white/10"
             title="Open">
@@ -251,6 +291,10 @@ const BannerCard = memo(function BannerCard({ item }: { item: BannerItem }) {
             <p className="text-xs break-all line-clamp-2 leading-relaxed opacity-70">
               {item.url.replace(/^https?:\/\//, "")}
             </p>
+          </div>
+          {/* Group badge — overlaid bottom-left on placeholder */}
+          <div className="absolute bottom-2 left-2">
+            <GroupBadge group={item.group} />
           </div>
           <button onClick={handleOpen}
             className="absolute top-2 right-2 w-8 h-8 rounded-lg bg-black/50 hover:bg-orange-500 flex items-center justify-center transition-colors border border-white/10">
