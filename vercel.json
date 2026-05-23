@@ -1,0 +1,14 @@
+{
+  "buildCommand": "pnpm --filter @workspace/free-fire-banners run build",
+  "outputDirectory": "artifacts/free-fire-banners/dist/public",
+  "installCommand": "pnpm install",
+  "framework": null,
+  "env": {
+    "BASE_PATH": "/"
+  },
+  "functions": {
+    "api/banners.ts": {
+      "runtime": "edge"
+    }
+  }
+}
