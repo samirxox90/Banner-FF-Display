@@ -1,0 +1,13 @@
+{
+  "buildCommand": "NODE_ENV=production pnpm run build",
+  "outputDirectory": "dist",
+  "installCommand": "pnpm install",
+  "framework": null,
+  "env": {
+    "BASE_PATH": "/"
+  },
+  "functions": {
+    "api/banners.ts": { "runtime": "edge" },
+    "api/store.ts":   { "runtime": "edge" }
+  }
+}

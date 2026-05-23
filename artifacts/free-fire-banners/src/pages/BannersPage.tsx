@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback, useEffect, useTransition, memo } from "
 import { useQuery } from "@tanstack/react-query";
 import {
   Check, Copy, ExternalLink, ChevronDown, Loader2,
-  AlertCircle, Search, X, Sparkles, ShoppingBag, LayoutGrid,
+  AlertCircle, Search, X, ShoppingBag, LayoutGrid,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -24,16 +24,13 @@ const REGIONS = [
   { code: "TW",    name: "Taiwan" },
 ];
 
-/* Region code → actual API param (some regions differ) */
-const REGION_API_CODE: Record<string, string> = {
-  ME: "MEA",
-};
+const REGION_API_CODE: Record<string, string> = { ME: "MEA" };
 function apiCode(region: string): string {
   return REGION_API_CODE[region] ?? region;
 }
 
-/* Per-region quick-filter chips */
-const REGION_FILTERS: Record<string, string[]> = {
+/* ─── Quick-filter chips per tab ─── */
+const BANNER_FILTERS: Record<string, string[]> = {
   SG:    ["Tab", "1400x700"],
   IND:   ["Tab", "1400x700"],
   BD:    ["Tab", "1400x700"],
@@ -50,7 +47,24 @@ const REGION_FILTERS: Record<string, string[]> = {
   TH:    ["TabTH", "1400x700"],
 };
 
-/* Group priority: EVENTS first = most recent */
+const STORE_FILTERS: Record<string, string[]> = {
+  SG:    ["252x256", "1500x750", "512x182"],
+  BD:    ["252x256", "1500x750", "512x182"],
+  IND:   ["252x256", "1500x750", "512x182"],
+  CIS:   ["252x256", "1500x750", "512x182"],
+  EU:    ["252x256", "1500x750", "512x182"],
+  NA:    ["252x256", "1500x750", "512x182"],
+  PK:    ["252x256", "1500x750", "512x182"],
+  BR:    ["252x256", "1500x750", "512x182"],
+  LATAM: ["252x256", "1500x750", "512x182"],
+  ID:    ["bgmall", "mallsmall", "titlemall"],
+  ME:    ["BG", "TT", "SM"],
+  TH:    ["LeftBG", "LeftTitle", "LeftMall"],
+  TW:    ["252x256", "512x182"],
+  VN:    [],
+};
+
+/* ─── Group priority ─── */
 const GROUP_ORDER = [
   "EVENTS", "LUCKROYALE", "MISSION", "TOPUP",
   "BOOYAHPASS", "PATCH", "SOCIALS_HTML", "OTHERS",
@@ -84,7 +98,6 @@ interface ApiResponseOld {
 }
 type ApiResponse = ApiResponseNew | ApiResponseOld;
 
-/* Normalised item */
 interface BannerItem {
   id: string;
   request_name: string;
@@ -120,7 +133,7 @@ function isJunkUrl(url: string): boolean {
   return JUNK_RE.test(url);
 }
 
-/* ─── Normalise → BannerItem[] ─── */
+/* ─── Normalise ─── */
 function normaliseItems(data: ApiResponse): BannerItem[] {
   const items: BannerItem[] = [];
 
@@ -164,7 +177,14 @@ function normaliseItems(data: ApiResponse): BannerItem[] {
 function fetchBanners(region: string): Promise<ApiResponse> {
   return fetch(`/api/banners?server=${apiCode(region)}`).then((r) => {
     if (!r.ok) throw new Error("fetch failed");
-    return r.json();
+    return r.json() as Promise<ApiResponse>;
+  });
+}
+
+function fetchStore(region: string): Promise<ApiResponse> {
+  return fetch(`/api/store?server=${apiCode(region)}`).then((r) => {
+    if (!r.ok) throw new Error("fetch failed");
+    return r.json() as Promise<ApiResponse>;
   });
 }
 
@@ -215,7 +235,7 @@ function GroupBadge({ group }: { group: string }) {
   );
 }
 
-/* ─── Banner Card (memoised) ─── */
+/* ─── Banner Card ─── */
 const BannerCard = memo(function BannerCard({ item }: { item: BannerItem }) {
   const { toast } = useToast();
   const [copied, setCopied]     = useState(false);
@@ -238,25 +258,18 @@ const BannerCard = memo(function BannerCard({ item }: { item: BannerItem }) {
   return (
     <div className="overflow-hidden rounded-xl border border-white/5 bg-white/[0.04] hover:border-orange-500/25 hover:bg-white/[0.06]"
          style={{ transition: "border-color 120ms, background-color 120ms" }}>
-
       {isImage && !imgError ? (
         <div className="relative w-full bg-black/40 overflow-hidden" style={{ aspectRatio: "21/9" }}>
-          <img
-            src={item.url}
-            alt={item.request_name}
-            className="w-full h-full object-cover"
-            onError={() => setImgError(true)}
-            loading="lazy"
-            decoding="async"
-          />
+          <img src={item.url} alt={item.request_name}
+               className="w-full h-full object-cover"
+               onError={() => setImgError(true)} loading="lazy" decoding="async" />
           <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-transparent to-transparent pointer-events-none" />
           <div className="absolute bottom-2 left-2 pointer-events-none">
             <GroupBadge group={item.group} />
           </div>
           <button onClick={handleOpen}
             className="absolute top-2 right-2 w-7 h-7 rounded-lg bg-black/55 hover:bg-orange-500 flex items-center justify-center border border-white/10"
-            style={{ transition: "background-color 100ms" }}
-            title="Open">
+            style={{ transition: "background-color 100ms" }} title="Open">
             <ExternalLink size={12} className="text-white" />
           </button>
         </div>
@@ -269,9 +282,7 @@ const BannerCard = memo(function BannerCard({ item }: { item: BannerItem }) {
               {item.url.replace(/^https?:\/\//, "")}
             </p>
           </div>
-          <div className="absolute bottom-2 left-2">
-            <GroupBadge group={item.group} />
-          </div>
+          <div className="absolute bottom-2 left-2"><GroupBadge group={item.group} /></div>
           <button onClick={handleOpen}
             className="absolute top-2 right-2 w-7 h-7 rounded-lg bg-black/50 hover:bg-orange-500 flex items-center justify-center border border-white/10"
             style={{ transition: "background-color 100ms" }}>
@@ -279,7 +290,6 @@ const BannerCard = memo(function BannerCard({ item }: { item: BannerItem }) {
           </button>
         </div>
       )}
-
       <div className="px-3 py-2.5 flex items-center justify-between gap-3">
         <p className="text-sm font-medium text-white/75 truncate" title={item.request_name}>
           {item.request_name}
@@ -308,7 +318,7 @@ function useDebounce<T>(value: T, ms: number): T {
   return d;
 }
 
-/* ─── Small helpers ─── */
+/* ─── Status views ─── */
 function StatusView({ icon, text }: { icon: React.ReactNode; text: string }) {
   return (
     <div className="flex flex-col items-center justify-center py-24 gap-3">
@@ -318,84 +328,187 @@ function StatusView({ icon, text }: { icon: React.ReactNode; text: string }) {
   );
 }
 
-function StoreComing() {
+/* ─── Shared filter/search bar ─── */
+function FilterBar({
+  searchRaw, onSearchChange, onClearSearch,
+  quickFilters, activeFilter, onFilterChip,
+  placeholder,
+}: {
+  searchRaw: string;
+  onSearchChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onClearSearch: () => void;
+  quickFilters: string[];
+  activeFilter: string | null;
+  onFilterChip: (chip: string) => void;
+  placeholder: string;
+}) {
   return (
-    <div className="flex flex-col items-center justify-center py-28 gap-5">
-      <div className="relative">
-        <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-orange-500/20 to-orange-700/10 border border-orange-500/20 flex items-center justify-center">
-          <ShoppingBag size={38} className="text-orange-500/55" />
+    <>
+      <div className="relative mb-2">
+        <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/25 pointer-events-none" />
+        <input type="text" value={searchRaw} onChange={onSearchChange}
+          placeholder={placeholder}
+          className="w-full bg-white/[0.05] border border-white/8 focus:border-orange-500/50 rounded-xl pl-8 pr-8 py-2.5 text-sm text-white placeholder:text-white/25 outline-none"
+          style={{ transition: "border-color 100ms" }} />
+        {searchRaw && (
+          <button onClick={onClearSearch}
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60 p-0.5"
+            style={{ transition: "color 80ms" }}>
+            <X size={13} />
+          </button>
+        )}
+      </div>
+      {quickFilters.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-1">
+          {quickFilters.map((chip) => (
+            <button key={chip} onClick={() => onFilterChip(chip)}
+              className={`px-2.5 py-1 rounded-lg text-xs font-medium border ${
+                activeFilter === chip
+                  ? "bg-orange-500 text-white border-orange-500"
+                  : "bg-white/5 text-white/45 border-white/8 hover:bg-white/10 hover:text-white/80"
+              }`}
+              style={{ transition: "background-color 80ms, color 80ms" }}>
+              {chip}
+            </button>
+          ))}
+          {activeFilter && (
+            <button onClick={() => onFilterChip(activeFilter)}
+              className="px-2 py-1 rounded-lg text-xs text-white/30 hover:text-white/60 flex items-center gap-1"
+              style={{ transition: "color 80ms" }}>
+              <X size={10} /> Clear
+            </button>
+          )}
         </div>
-        <div className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-orange-500 flex items-center justify-center">
-          <Sparkles size={10} className="text-white" />
-        </div>
-      </div>
-      <div className="text-center space-y-2">
-        <h3 className="text-xl font-bold text-white/85 tracking-tight">Coming Soon</h3>
-        <p className="text-white/35 text-sm max-w-xs leading-relaxed">
-          The Store section is under construction. 252x256 &amp; 1500x750 Link Appear Soon.
-        </p>
-      </div>
-      <div className="flex gap-1.5 mt-1">
-        {[0, 1, 2].map((i) => (
-          <div key={i} className="w-1.5 h-1.5 rounded-full bg-orange-500/45 animate-bounce"
-               style={{ animationDelay: `${i * 0.18}s` }} />
-        ))}
-      </div>
+      )}
+    </>
+  );
+}
+
+/* ─── Content list ─── */
+function ItemList({
+  items, isLoading, isError, regionName, search, activeFilter, label,
+}: {
+  items: BannerItem[];
+  isLoading: boolean;
+  isError: boolean;
+  regionName: string;
+  search: string;
+  activeFilter: string | null;
+  label: string;
+}) {
+  if (isLoading) return (
+    <StatusView icon={<Loader2 size={28} className="text-orange-500 animate-spin" />}
+                text={`Loading ${label} for ${regionName}…`} />
+  );
+  if (isError) return (
+    <StatusView icon={<AlertCircle size={28} className="text-red-500/60" />}
+                text={`Failed to load ${label}. Try a different region.`} />
+  );
+  if (items.length === 0) return (
+    <StatusView icon={<Search size={26} className="text-white/20" />}
+                text={activeFilter || search
+                  ? `No results for "${activeFilter ?? search}"`
+                  : `No ${label} found for this region.`} />
+  );
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-white/20 font-medium">
+        {items.length} {label.slice(0, -1)}{items.length !== 1 ? "s" : ""}
+        {(activeFilter || search) ? ` — "${activeFilter ?? search}"` : ""}
+      </p>
+      {items.map((item) => <BannerCard key={item.id} item={item} />)}
     </div>
   );
 }
 
 /* ─── Main Page ─── */
 export default function BannersPage() {
-  const [region, setRegion]             = useState("IND");
-  const [activeTab, setActiveTab]       = useState<Tab>("banners");
-  const [regionOpen, setRegionOpen]     = useState(false);
-  const [searchRaw, setSearchRaw]       = useState("");
-  const [activeFilter, setActiveFilter] = useState<string | null>(null);
-  const [, startTransition] = useTransition();
+  const [region, setRegion]         = useState("IND");
+  const [activeTab, setActiveTab]   = useState<Tab>("banners");
+  const [regionOpen, setRegionOpen] = useState(false);
+  const [, startTransition]         = useTransition();
 
-  const search         = useDebounce(searchRaw, 250);
+  /* Banners tab state */
+  const [bSearchRaw, setBSearchRaw]       = useState("");
+  const [bActiveFilter, setBActiveFilter] = useState<string | null>(null);
+
+  /* Store tab state */
+  const [sSearchRaw, setSSearchRaw]       = useState("");
+  const [sActiveFilter, setSActiveFilter] = useState<string | null>(null);
+
+  const bSearch = useDebounce(bSearchRaw, 250);
+  const sSearch = useDebounce(sSearchRaw, 250);
+
   const selectedRegion = REGIONS.find((r) => r.code === region) ?? REGIONS[0];
-  const quickFilters   = REGION_FILTERS[region] ?? [];
+  const bannerFilters  = BANNER_FILTERS[region] ?? [];
+  const storeFilters   = STORE_FILTERS[region]  ?? [];
 
-  /* Reset filters on region change */
+  /* Reset filters when region changes */
   useEffect(() => {
-    setActiveFilter(null);
-    setSearchRaw("");
+    setBActiveFilter(null); setBSearchRaw("");
+    setSActiveFilter(null); setSSearchRaw("");
   }, [region]);
 
-  const { data, isLoading, isError } = useQuery({
-    queryKey:  ["banners-v2", region],
-    queryFn:   () => fetchBanners(region),
+  /* Queries */
+  const bannersQuery = useQuery({
+    queryKey: ["banners-v2", region],
+    queryFn:  () => fetchBanners(region),
     staleTime: 5 * 60 * 1000,
   });
 
-  const allItems = useMemo((): BannerItem[] => {
-    if (!data) return [];
-    return normaliseItems(data);
-  }, [data]);
+  const storeQuery = useQuery({
+    queryKey:  ["store-v1", region],
+    queryFn:   () => fetchStore(region),
+    staleTime: 5 * 60 * 1000,
+    enabled:   activeTab === "store",
+  });
 
-  const filteredItems = useMemo(() => {
-    let items = allItems;
-    if (activeFilter) {
-      const af = activeFilter.toLowerCase();
+  const allBanners = useMemo(() => bannersQuery.data ? normaliseItems(bannersQuery.data) : [], [bannersQuery.data]);
+  const allStore   = useMemo(() => storeQuery.data   ? normaliseItems(storeQuery.data)   : [], [storeQuery.data]);
+
+  const filteredBanners = useMemo(() => {
+    let items = allBanners;
+    if (bActiveFilter) {
+      const af = bActiveFilter.toLowerCase();
       items = items.filter((i) => i.request_name.toLowerCase().includes(af) || i.url.toLowerCase().includes(af));
     }
-    if (search.trim()) {
-      const q = search.toLowerCase();
+    if (bSearch.trim()) {
+      const q = bSearch.toLowerCase();
       items = items.filter((i) => i.request_name.toLowerCase().includes(q) || i.url.toLowerCase().includes(q));
     }
     return items;
-  }, [allItems, search, activeFilter]);
+  }, [allBanners, bSearch, bActiveFilter]);
 
-  const handleSearchChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setSearchRaw(e.target.value);
-  }, []);
-  const handleClearSearch = useCallback(() => setSearchRaw(""), []);
-  const handleFilterChip  = useCallback((chip: string) => {
+  const filteredStore = useMemo(() => {
+    let items = allStore;
+    if (sActiveFilter) {
+      const af = sActiveFilter.toLowerCase();
+      items = items.filter((i) => i.request_name.toLowerCase().includes(af) || i.url.toLowerCase().includes(af));
+    }
+    if (sSearch.trim()) {
+      const q = sSearch.toLowerCase();
+      items = items.filter((i) => i.request_name.toLowerCase().includes(q) || i.url.toLowerCase().includes(q));
+    }
+    return items;
+  }, [allStore, sSearch, sActiveFilter]);
+
+  /* Handlers — banners */
+  const handleBSearch  = useCallback((e: React.ChangeEvent<HTMLInputElement>) => setBSearchRaw(e.target.value), []);
+  const handleBClear   = useCallback(() => setBSearchRaw(""), []);
+  const handleBFilter  = useCallback((chip: string) => {
     startTransition(() => {
-      setActiveFilter((p) => (p === chip ? null : chip));
-      setSearchRaw("");
+      setBActiveFilter((p) => (p === chip ? null : chip));
+      setBSearchRaw("");
+    });
+  }, []);
+
+  /* Handlers — store */
+  const handleSSearch  = useCallback((e: React.ChangeEvent<HTMLInputElement>) => setSSearchRaw(e.target.value), []);
+  const handleSClear   = useCallback(() => setSSearchRaw(""), []);
+  const handleSFilter  = useCallback((chip: string) => {
+    startTransition(() => {
+      setSActiveFilter((p) => (p === chip ? null : chip));
+      setSSearchRaw("");
     });
   }, []);
 
@@ -441,7 +554,9 @@ export default function BannersPage() {
                         }`}
                         style={{ transition: "background-color 80ms" }}>
                         <span>{r.name}</span>
-                        <span className={`text-xs font-mono ${r.code === region ? "text-orange-400" : "text-white/25"}`}>{r.code}</span>
+                        <span className={`text-xs font-mono ${r.code === region ? "text-orange-400" : "text-white/25"}`}>
+                          {r.code === "ME" ? "MEA" : r.code}
+                        </span>
                       </button>
                     ))}
                   </div>
@@ -466,51 +581,19 @@ export default function BannersPage() {
             ))}
           </div>
 
-          {/* Search + chips */}
-          {activeTab === "banners" && (
-            <>
-              <div className="relative mb-2">
-                <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/25 pointer-events-none" />
-                <input
-                  type="text"
-                  value={searchRaw}
-                  onChange={handleSearchChange}
-                  placeholder="Search banners…"
-                  className="w-full bg-white/[0.05] border border-white/8 focus:border-orange-500/50 rounded-xl pl-8 pr-8 py-2.5 text-sm text-white placeholder:text-white/25 outline-none"
-                  style={{ transition: "border-color 100ms" }}
-                />
-                {searchRaw && (
-                  <button onClick={handleClearSearch}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60 p-0.5"
-                    style={{ transition: "color 80ms" }}>
-                    <X size={13} />
-                  </button>
-                )}
-              </div>
-
-              {quickFilters.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mb-1">
-                  {quickFilters.map((chip) => (
-                    <button key={chip} onClick={() => handleFilterChip(chip)}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-medium border ${
-                        activeFilter === chip
-                          ? "bg-orange-500 text-white border-orange-500"
-                          : "bg-white/5 text-white/45 border-white/8 hover:bg-white/10 hover:text-white/80"
-                      }`}
-                      style={{ transition: "background-color 80ms, color 80ms" }}>
-                      {chip}
-                    </button>
-                  ))}
-                  {activeFilter && (
-                    <button onClick={() => setActiveFilter(null)}
-                      className="px-2 py-1 rounded-lg text-xs text-white/30 hover:text-white/60 flex items-center gap-1"
-                      style={{ transition: "color 80ms" }}>
-                      <X size={10} /> Clear
-                    </button>
-                  )}
-                </div>
-              )}
-            </>
+          {/* Search + filter chips */}
+          {activeTab === "banners" ? (
+            <FilterBar
+              searchRaw={bSearchRaw} onSearchChange={handleBSearch} onClearSearch={handleBClear}
+              quickFilters={bannerFilters} activeFilter={bActiveFilter} onFilterChip={handleBFilter}
+              placeholder="Search banners…"
+            />
+          ) : (
+            <FilterBar
+              searchRaw={sSearchRaw} onSearchChange={handleSSearch} onClearSearch={handleSClear}
+              quickFilters={storeFilters} activeFilter={sActiveFilter} onFilterChip={handleSFilter}
+              placeholder="Search store assets…"
+            />
           )}
 
           <div className="mt-2 h-px bg-gradient-to-r from-orange-500/20 via-white/5 to-transparent" />
@@ -522,33 +605,26 @@ export default function BannersPage() {
 
         {/* ── Content ── */}
         <main className="mt-4">
-          {activeTab === "store" ? (
-            <StoreComing />
-          ) : isLoading ? (
-            <StatusView
-              icon={<Loader2 size={28} className="text-orange-500 animate-spin" />}
-              text={`Loading banners for ${selectedRegion.name}…`} />
-          ) : isError ? (
-            <StatusView
-              icon={<AlertCircle size={28} className="text-red-500/60" />}
-              text="Failed to load banners. Try a different region." />
-          ) : filteredItems.length === 0 ? (
-            <StatusView
-              icon={<Search size={26} className="text-white/20" />}
-              text={activeFilter || search
-                ? `No results for "${activeFilter ?? search}"`
-                : "No banners found for this region."} />
+          {activeTab === "banners" ? (
+            <ItemList
+              items={filteredBanners}
+              isLoading={bannersQuery.isLoading}
+              isError={bannersQuery.isError}
+              regionName={selectedRegion.name}
+              search={bSearch}
+              activeFilter={bActiveFilter}
+              label="banners"
+            />
           ) : (
-            <div className="space-y-3">
-              <p className="text-xs text-white/20 font-medium">
-                {filteredItems.length} banner{filteredItems.length !== 1 ? "s" : ""}
-                {(activeFilter || search) ? ` — "${activeFilter ?? search}"` : ""}
-              </p>
-
-              {filteredItems.map((item) => (
-                <BannerCard key={item.id} item={item} />
-              ))}
-            </div>
+            <ItemList
+              items={filteredStore}
+              isLoading={storeQuery.isLoading}
+              isError={storeQuery.isError}
+              regionName={selectedRegion.name}
+              search={sSearch}
+              activeFilter={sActiveFilter}
+              label="store assets"
+            />
           )}
         </main>
       </div>
