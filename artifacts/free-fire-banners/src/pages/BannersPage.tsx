@@ -56,8 +56,6 @@ const GROUP_ORDER = [
   "BOOYAHPASS", "PATCH", "SOCIALS_HTML", "OTHERS",
 ];
 
-const PAGE_SIZE = 30;
-
 type Tab = "banners" | "store";
 
 /* ─── API shapes ─── */
@@ -354,22 +352,17 @@ export default function BannersPage() {
   const [regionOpen, setRegionOpen]     = useState(false);
   const [searchRaw, setSearchRaw]       = useState("");
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
-  const [, startTransition]             = useTransition();
+  const [, startTransition] = useTransition();
 
   const search         = useDebounce(searchRaw, 250);
   const selectedRegion = REGIONS.find((r) => r.code === region) ?? REGIONS[0];
   const quickFilters   = REGION_FILTERS[region] ?? [];
 
-  /* Reset pagination + filters on region change */
+  /* Reset filters on region change */
   useEffect(() => {
     setActiveFilter(null);
     setSearchRaw("");
-    setVisibleCount(PAGE_SIZE);
   }, [region]);
-
-  /* Reset pagination on filter/search change */
-  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [search, activeFilter]);
 
   const { data, isLoading, isError } = useQuery({
     queryKey:  ["banners-v2", region],
@@ -395,13 +388,6 @@ export default function BannersPage() {
     return items;
   }, [allItems, search, activeFilter]);
 
-  /* Only render the current page slice */
-  const visibleItems = useMemo(
-    () => filteredItems.slice(0, visibleCount),
-    [filteredItems, visibleCount]
-  );
-  const hasMore = visibleCount < filteredItems.length;
-
   const handleSearchChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     startTransition(() => setSearchRaw(e.target.value));
   }, []);
@@ -411,9 +397,6 @@ export default function BannersPage() {
       setActiveFilter((p) => (p === chip ? null : chip));
       setSearchRaw("");
     });
-  }, []);
-  const handleLoadMore = useCallback(() => {
-    startTransition(() => setVisibleCount((n) => n + PAGE_SIZE));
   }, []);
 
   return (
@@ -558,21 +541,13 @@ export default function BannersPage() {
           ) : (
             <div className="space-y-3">
               <p className="text-xs text-white/20 font-medium">
-                Showing {visibleItems.length} of {filteredItems.length} banner{filteredItems.length !== 1 ? "s" : ""}
+                {filteredItems.length} banner{filteredItems.length !== 1 ? "s" : ""}
                 {(activeFilter || search) ? ` — "${activeFilter ?? search}"` : ""}
               </p>
 
-              {visibleItems.map((item) => (
+              {filteredItems.map((item) => (
                 <BannerCard key={item.id} item={item} />
               ))}
-
-              {hasMore && (
-                <button onClick={handleLoadMore}
-                  className="w-full py-3 rounded-xl text-sm font-semibold text-white/50 hover:text-white bg-white/[0.03] hover:bg-white/[0.07] border border-white/6 hover:border-orange-500/30"
-                  style={{ transition: "background-color 100ms, color 100ms, border-color 100ms" }}>
-                  Load more — {filteredItems.length - visibleCount} remaining
-                </button>
-              )}
             </div>
           )}
         </main>
