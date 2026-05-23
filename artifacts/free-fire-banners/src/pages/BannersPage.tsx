@@ -411,7 +411,7 @@ export default function BannersPage() {
             <div className="flex items-center gap-2.5">
               <FFLogo />
               <div>
-                <h1 className="text-base font-bold text-white leading-none tracking-wide">FF Login Banners</h1>
+                <h1 className="text-base font-bold text-white leading-none tracking-wide">FF Live Banners</h1>
                 <p className="text-[10px] text-orange-500/70 font-medium tracking-widest uppercase mt-0.5">Free Fire Asset Viewer</p>
               </div>
             </div>

@@ -1,6 +1,8 @@
+import { useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import BannersPage from "@/pages/BannersPage";
+import LoginPage, { getStoredAuth } from "@/pages/LoginPage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -12,9 +14,15 @@ const queryClient = new QueryClient({
 });
 
 function App() {
+  const [authed, setAuthed] = useState(() => getStoredAuth());
+
   return (
     <QueryClientProvider client={queryClient}>
-      <BannersPage />
+      {authed ? (
+        <BannersPage />
+      ) : (
+        <LoginPage onSuccess={() => setAuthed(true)} />
+      )}
       <Toaster />
     </QueryClientProvider>
   );
